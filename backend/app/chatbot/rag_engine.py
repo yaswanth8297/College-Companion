@@ -265,14 +265,25 @@ class CollegeChatbotEngine:
         if api_key and GENAI_AVAILABLE and relevant_docs:
             try:
                 genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                
+                # Small, lightweight model (gemini-1.5-flash-8b) to save credits and maintain fast speed
+                model_name = os.environ.get('GEMINI_MODEL') or 'gemini-1.5-flash-8b'
+                generation_config = {
+                    "max_output_tokens": 250,
+                    "temperature": 0.3,
+                }
+                
+                try:
+                    model = genai.GenerativeModel(model_name, generation_config=generation_config)
+                except Exception:
+                    model = genai.GenerativeModel('gemini-1.5-flash', generation_config=generation_config)
                 
                 context_text = "\n\n".join([f"Source: {doc['title']}\n{doc['content']}" for doc in relevant_docs])
                 
                 prompt = f"""You are Ratna, the official AI College Companion for Dr. Lankapalli Bullayya College of Engineering (Visakhapatnam, Andhra Pradesh).
-Answer the user's question using ONLY the provided verified context.
+Answer the user's question concisely using ONLY the provided verified context.
 Strict Rules:
-- Answer accurately, politely, and concisely as Ratna.
+- Answer accurately, politely, and briefly (2-4 sentences) as Ratna.
 - Do NOT hallucinate fees, phone numbers, admission dates, faculty names, or building locations.
 - If the information is not present in the context, respond strictly:
 "I don't have verified information about this yet. Please contact the college administration for confirmation."

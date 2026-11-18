@@ -43,8 +43,9 @@ class Config:
     SQLALCHEMY_DATABASE_URI = db_uri
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # AI configuration
+    # AI configuration - defaults to smallest, fastest, credit-efficient Gemini 1.5 Flash-8B
     GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or ''
+    GEMINI_MODEL = os.environ.get('GEMINI_MODEL') or 'gemini-1.5-flash-8b'
     
     # File uploads
     UPLOAD_FOLDER = upload_folder
