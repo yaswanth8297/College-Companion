@@ -51,8 +51,9 @@ def create_app(config_class=Config):
     app.register_blueprint(academic_bp)
     app.register_blueprint(grievance_bp)
 
-    # Health check route
+    # Health check route (supports both /api/health and /health)
     @app.route('/api/health', methods=['GET'])
+    @app.route('/health', methods=['GET'])
     def health_check():
         return jsonify({
             'status': 'healthy',
@@ -60,13 +61,22 @@ def create_app(config_class=Config):
             'institution': 'Dr. Lankapalli Bullayya College of Engineering'
         }), 200
 
+    # Global error handlers
+    @app.errorhandler(500)
+    def internal_error(e):
+        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
+
+    @app.errorhandler(Exception)
+    def unhandled_error(e):
+        return jsonify({'error': 'Server error', 'details': str(e)}), 500
+
     # Initialize tables and seed verified data within context
     with app.app_context():
-        db.create_all()
-        from app.services.seed_data import seed_database
         try:
+            db.create_all()
+            from app.services.seed_data import seed_database
             seed_database()
         except Exception as e:
-            print(f"Error seeding database: {e}")
+            print(f"Database initialization/seeding warning: {e}")
 
     return app

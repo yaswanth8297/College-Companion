@@ -19,11 +19,13 @@ default_db_path = local_db_path if os.path.exists(local_db_path) else parent_db_
 
 if is_vercel:
     target_db_path = '/tmp/college.db'
-    if os.path.exists(default_db_path) and not os.path.exists(target_db_path):
-        try:
+    try:
+        os.makedirs('/tmp', exist_ok=True)
+        os.makedirs('/tmp/uploads', exist_ok=True)
+        if os.path.exists(default_db_path) and not os.path.exists(target_db_path):
             shutil.copy2(default_db_path, target_db_path)
-        except Exception as e:
-            print(f"Warning: could not copy pre-seeded database to /tmp: {e}")
+    except Exception as e:
+        print(f"Warning: could not setup /tmp database: {e}")
     DATABASE_PATH = target_db_path
     db_uri = db_url or f"sqlite:///{target_db_path}"
     upload_folder = '/tmp/uploads'
