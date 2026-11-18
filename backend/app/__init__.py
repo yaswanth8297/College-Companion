@@ -55,10 +55,14 @@ def create_app(config_class=Config):
     @app.route('/api/health', methods=['GET'])
     @app.route('/health', methods=['GET'])
     def health_check():
+        raw_key = os.environ.get('GEMINI_API_KEY') or ''
         return jsonify({
             'status': 'healthy',
             'platform': 'College Companion API',
-            'institution': 'Dr. Lankapalli Bullayya College of Engineering'
+            'institution': 'Dr. Lankapalli Bullayya College of Engineering',
+            'has_gemini_key': bool(raw_key),
+            'key_length': len(raw_key),
+            'model': os.environ.get('GEMINI_MODEL') or 'gemini-flash-lite-latest'
         }), 200
 
     # Global error handlers
