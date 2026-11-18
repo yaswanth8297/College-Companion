@@ -266,18 +266,6 @@ class CollegeChatbotEngine:
             try:
                 genai.configure(api_key=api_key)
                 
-                # Small, lightweight model (gemini-1.5-flash-8b) to save credits and maintain fast speed
-                model_name = os.environ.get('GEMINI_MODEL') or 'gemini-1.5-flash-8b'
-                generation_config = {
-                    "max_output_tokens": 250,
-                    "temperature": 0.3,
-                }
-                
-                try:
-                    model = genai.GenerativeModel(model_name, generation_config=generation_config)
-                except Exception:
-                    model = genai.GenerativeModel('gemini-1.5-flash', generation_config=generation_config)
-                
                 context_text = "\n\n".join([f"Source: {doc['title']}\n{doc['content']}" for doc in relevant_docs])
                 
                 prompt = f"""You are Ratna, the official AI College Companion for Dr. Lankapalli Bullayya College of Engineering (Visakhapatnam, Andhra Pradesh).
@@ -293,8 +281,34 @@ Verified College Context:
 
 User Question: {clean_msg}
 Assistant Answer:"""
+
+                # Small, lightweight model (gemini-flash-lite-latest) to save credits and maintain fast speed
+                requested_model = os.environ.get('GEMINI_MODEL', '').strip()
+                candidate_models = [
+                    requested_model,
+                    'gemini-flash-lite-latest',
+                    'gemini-3.5-flash-lite',
+                    'gemini-3.8-flash'
+                ]
                 
-                ai_resp = model.generate_content(prompt)
+                generation_config = {
+                    "max_output_tokens": 250,
+                    "temperature": 0.3,
+                }
+                
+                ai_resp = None
+                for candidate in candidate_models:
+                    if not candidate:
+                        continue
+                    try:
+                        m = genai.GenerativeModel(candidate, generation_config=generation_config)
+                        ai_resp = m.generate_content(prompt)
+                        if ai_resp and ai_resp.text:
+                            break
+                    except Exception as model_err:
+                        print(f"Model {candidate} fallback: {model_err}")
+                        continue
+                
                 if ai_resp and ai_resp.text:
                     return {
                         'response': ai_resp.text.strip(),
