@@ -13,8 +13,9 @@ db_url = os.environ.get('DATABASE_URL')
 if db_url and db_url.startswith('postgres://'):
     db_url = db_url.replace('postgres://', 'postgresql://', 1)
 
-default_db_dir = os.path.abspath(os.path.join(basedir, '..', 'database'))
-default_db_path = os.path.join(default_db_dir, 'college.db')
+local_db_path = os.path.join(basedir, 'database', 'college.db')
+parent_db_path = os.path.abspath(os.path.join(basedir, '..', 'database', 'college.db'))
+default_db_path = local_db_path if os.path.exists(local_db_path) else parent_db_path
 
 if is_vercel:
     target_db_path = '/tmp/college.db'
