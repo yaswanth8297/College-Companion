@@ -123,171 +123,88 @@ class CollegeChatbotEngine:
     def process_chat(cls, user_message, session_id=None, gemini_api_key=None):
         """
         Main orchestration endpoint:
-        1. Checks for affirmative follow-ups ('yes', 'sure', 'ok') to navigation prompts
-        2. Detects navigation requests
-        3. Falls back to RAG / knowledge retrieval
-        4. Calls Gemini if API key configured, otherwise high-precision rule-based knowledge engine
+        1. Always prioritizes Gemini API when key is configured.
+        2. Detects navigation entities and calculates graph shortest path when applicable.
+        3. Falls back to offline rule-based knowledge engine only if Gemini is unavailable or disabled.
         """
         clean_msg = user_message.strip()
         clean_lower = clean_msg.lower()
-        
-        # 1. Check affirmative follow-ups ("yes", "yeah", "sure", "please navigate")
-        last_chat = cls.get_last_bot_question(session_id)
-        if last_chat and any(clean_lower == aff or clean_lower.startswith(aff + " ") for aff in ['yes', 'yeah', 'sure', 'yep', 'ok', 'okay', 'please', 'show me']):
-            # Check if previous response offered navigation from Main Gate
-            if "would you like directions from the main gate" in last_chat.bot_response.lower() or "would you like directions" in last_chat.bot_response.lower():
-                # Extract previous target destination
-                prev_loc_match = re.search(r'([A-Za-z0-9\s]+?)\s+is (?:located|available) on the campus', last_chat.bot_response)
-                if prev_loc_match:
-                    dest_str = prev_loc_match.group(1).strip()
-                    dest_loc = IntentDetector.resolve_location(dest_str)
-                    main_gate = CampusLocation.query.filter_by(slug='main_gate').first()
-                    if dest_loc and main_gate:
-                        route = CampusNavigationEngine.find_shortest_path(main_gate.id, dest_loc.id)
-                        if route:
-                            steps_str = "\n".join([f"{i+1}. {s['instruction']}" for i, s in enumerate(route['detailed_steps'])])
-                            response_text = (
-                                f"Here are the walking directions from {main_gate.name} to {dest_loc.name} "
-                                f"({route['total_distance_meters']} meters, approximately {route['estimated_minutes']} min walk):\n\n"
-                                f"{steps_str}\n\n"
-                                f"Click below to see the interactive route highlighted on the campus map."
-                            )
-                            return {
-                                'response': response_text,
-                                'intent': 'navigation',
-                                'navigation_route': route,
-                                'suggested_questions': [
-                                    "Where is the college canteen?",
-                                    "What are the library timings?",
-                                    "Tell me about CSE department"
-                                ]
-                            }
-
-        # 2. Check greetings
-        if IntentDetector.is_greeting(clean_msg):
-            return {
-                'response': "Namaste! I am Ratna, your AI College Companion for Dr. Lankapalli Bullayya College of Engineering. How can I assist you today? You can ask me for walking directions to any campus block, department details, facilities, or admissions.",
-                'intent': 'greeting',
-                'navigation_route': None,
-                'suggested_questions': [
-                    "How do I reach the library from the main gate?",
-                    "Where is the Computer Science block?",
-                    "What are the admission requirements for B.Tech?",
-                    "Where is the college canteen?"
-                ]
-            }
-
-        # 3. Check navigation intent
-        origin_str, dest_str = IntentDetector.extract_navigation_entities(clean_msg)
-        
-        # If destination was found
-        if dest_str:
-            dest_loc = IntentDetector.resolve_location(dest_str)
-            if dest_loc:
-                # If origin was specified
-                if origin_str:
-                    origin_loc = IntentDetector.resolve_location(origin_str)
-                    if not origin_loc:
-                        # Ambiguous origin
-                        return {
-                            'response': f"I found the destination **{dest_loc.name}**, but I couldn't locate '{origin_str}'. Are you starting from the Main Gate, Administrative Block, or somewhere else?",
-                            'intent': 'navigation_clarification',
-                            'navigation_route': None,
-                            'suggested_questions': [
-                                f"Directions from Main Gate to {dest_loc.name}",
-                                f"Directions from Admin Block to {dest_loc.name}"
-                            ]
-                        }
-                    # Calculate route
-                    route = CampusNavigationEngine.find_shortest_path(origin_loc.id, dest_loc.id)
-                    if route:
-                        steps_str = "\n".join([f"{i+1}. {s['instruction']}" for i, s in enumerate(route['detailed_steps'])])
-                        response_text = (
-                            f"Walking directions from **{origin_loc.name}** to **{dest_loc.name}** "
-                            f"({route['total_distance_meters']} meters, ~{route['estimated_minutes']} min walk):\n\n"
-                            f"{steps_str}\n\n"
-                            f"Click the button below to view the active path on the interactive campus map."
-                        )
-                        return {
-                            'response': response_text,
-                            'intent': 'navigation',
-                            'navigation_route': route,
-                            'suggested_questions': [
-                                "Where is the canteen?",
-                                "Show me sports facilities",
-                                "Find Principal's Office"
-                            ]
-                        }
-                    else:
-                        return {
-                            'response': f"I located both {origin_loc.name} and {dest_loc.name}, but there is currently no mapped pathway connecting them in the database. Please contact campus security for assistance.",
-                            'intent': 'navigation_error',
-                            'navigation_route': None
-                        }
-                else:
-                    # Destination known, but starting location not specified!
-                    if dest_loc.slug == 'cse':
-                        exact_text = "CSE is located in Block 8, 1st Floor."
-                    elif dest_loc.slug == 'ece':
-                        exact_text = "ECE is located in Block 8, 2nd Floor."
-                    elif dest_loc.slug == 'eee':
-                        exact_text = "EEE is located in Block 8, 3rd Floor."
-                    elif dest_loc.slug == 'civil':
-                        exact_text = "Civil Engineering is located in Block 7, 3rd Floor."
-                    elif dest_loc.slug == 'staff_room':
-                        exact_text = "The Staff Room is located in Block 8, 1st Floor, beside the lift."
-                    else:
-                        exact_text = f"{dest_loc.name} is located at {dest_loc.block_name}, {dest_loc.floor_level}."
-
-                    response_text = (
-                        f"{exact_text}\n\n"
-                        f"Would you like walking directions from the Main Gate or from another location?"
-                    )
-                    return {
-                        'response': response_text,
-                        'intent': 'navigation_prompt_origin',
-                        'destination_id': dest_loc.id,
-                        'destination_name': dest_loc.name,
-                        'destination_slug': dest_loc.slug,
-                        'suggested_questions': [
-                            f"How do I reach {dest_loc.name} from the main gate?",
-                            f"Directions from Admin Block to {dest_loc.name}",
-                            "Where is the Main Gate?"
-                        ]
-                    }
-
-        # 4. Knowledge Base RAG Search
-        corpus = cls.get_context_corpus()
-        relevant_docs = cls.find_relevant_context(clean_msg, corpus, top_k=3)
-        
-        # Check if Gemini API key is available
         api_key = gemini_api_key or os.environ.get('GEMINI_API_KEY')
-        if api_key and GENAI_AVAILABLE and relevant_docs:
+        
+        # 1. Navigation entity & route extraction (coordinates for map display)
+        origin_str, dest_str = IntentDetector.extract_navigation_entities(clean_msg)
+        dest_loc = IntentDetector.resolve_location(dest_str) if dest_str else None
+        origin_loc = IntentDetector.resolve_location(origin_str) if origin_str else None
+        
+        # Check follow-up affirmations ("yes", "sure", "show me directions")
+        last_chat = cls.get_last_bot_question(session_id)
+        if not dest_loc and last_chat and any(clean_lower == aff or clean_lower.startswith(aff + " ") for aff in ['yes', 'yeah', 'sure', 'yep', 'ok', 'okay', 'please', 'show me']):
+            prev_loc_match = re.search(r'([A-Za-z0-9\s]+?)\s+is (?:located|available) on the campus', last_chat.bot_response)
+            if prev_loc_match:
+                dest_loc = IntentDetector.resolve_location(prev_loc_match.group(1).strip())
+                origin_loc = CampusLocation.query.filter_by(slug='main_gate').first()
+
+        route = None
+        if origin_loc and dest_loc:
+            route = CampusNavigationEngine.find_shortest_path(origin_loc.id, dest_loc.id)
+
+        # 2. PRIORITY: IF GEMINI API KEY IS CONFIGURED -> GEMINI ALWAYS HANDLES THE RESPONSE!
+        if api_key and GENAI_AVAILABLE:
             try:
                 genai.configure(api_key=api_key)
                 
-                context_text = "\n\n".join([f"Source: {doc['title']}\n{doc['content']}" for doc in relevant_docs])
+                # Retrieve relevant context from database
+                corpus = cls.get_context_corpus()
+                relevant_docs = cls.find_relevant_context(clean_msg, corpus, top_k=4)
                 
-                prompt = f"""You are Ratna, the official AI College Companion for Dr. Lankapalli Bullayya College of Engineering (Visakhapatnam, Andhra Pradesh).
-Answer the user's question concisely using ONLY the provided verified context.
+                context_sections = []
+                if relevant_docs:
+                    context_sections.append("Relevant Verified College Context:\n" + "\n\n".join([f"[{d['title']}]: {d['content']}" for d in relevant_docs]))
+                
+                # Core DLBCOE campus directory & department map
+                context_sections.append(
+                    "Verified Campus Directory:\n"
+                    "- Block 8 (Engineering Multi-Storey): CSE is on the 1st Floor, ECE is on the 2nd Floor, EEE is on the 3rd Floor, and the Staff Room is on the 1st Floor beside the lift.\n"
+                    "- Block 7 (Engineering Multi-Storey): Civil Engineering is on the 3rd Floor.\n"
+                    "- Administrative Block: Houses Principal's Office, Admin Office, Admissions Desk, Accounts, and Exam Cell.\n"
+                    "- Central Library: Situated on western side of campus, ~92 meters from Main Gate.\n"
+                    "- College Canteen: North campus, directly behind Block 8.\n"
+                    "- Counseling Code: DLBC (AP EAPCET).\n"
+                    "- Institution: Dr. Lankapalli Bullayya College of Engineering (DLBCOE), Visakhapatnam, Andhra Pradesh."
+                )
+                
+                route_context = ""
+                if route:
+                    steps_text = "\n".join([f"{i+1}. {s['instruction']}" for i, s in enumerate(route['detailed_steps'])])
+                    route_context = (
+                        f"\nCalculated Walking Directions from {origin_loc.name} to {dest_loc.name} "
+                        f"({route['total_distance_meters']}m, approx {route['estimated_minutes']} min walk):\n"
+                        f"{steps_text}\n"
+                        f"Please explain these step-by-step turn directions clearly and inform the user that the route is highlighted on their campus map."
+                    )
+                
+                full_context = "\n\n".join(context_sections) + route_context
+                
+                prompt = f"""You are Ratna, the official AI College Companion for Dr. Lankapalli Bullayya College of Engineering (DLBCOE), Visakhapatnam.
+Answer the user's message accurately, politely, and concisely (2 to 4 sentences) as Ratna.
 Strict Rules:
-- Answer accurately, politely, and briefly (2-4 sentences) as Ratna.
-- Do NOT hallucinate fees, phone numbers, admission dates, faculty names, or building locations.
-- If the information is not present in the context, respond strictly:
-"I don't have verified information about this yet. Please contact the college administration for confirmation."
+- If the user asks where a department or facility is, tell them the exact block and floor.
+- If walking directions are provided above, explain them clearly.
+- If the user greets (e.g. 'hello', 'hi'), greet them warmly as Ratna and offer campus assistance.
+- Do NOT hallucinate unverified fees, phone numbers, or dates. If unknown, politely advise contacting the college office.
 
-Verified College Context:
-{context_text}
+Verified Knowledge:
+{full_context}
 
 User Question: {clean_msg}
-Assistant Answer:"""
+Ratna's Answer:"""
 
-                # Small, lightweight model (gemini-flash-lite-latest) to save credits and maintain fast speed
                 requested_model = os.environ.get('GEMINI_MODEL', '').strip()
                 candidate_models = [
                     requested_model,
                     'gemini-flash-lite-latest',
                     'gemini-3.5-flash-lite',
+                    'gemini-flash-latest',
                     'gemini-3.8-flash'
                 ]
                 
@@ -310,31 +227,102 @@ Assistant Answer:"""
                         continue
                 
                 if ai_resp and ai_resp.text:
-                    return {
+                    resp_dict = {
                         'response': ai_resp.text.strip(),
-                        'intent': 'college_info',
-                        'navigation_route': None,
+                        'intent': 'navigation' if route else 'college_info',
+                        'navigation_route': route,
                         'suggested_questions': [
-                            "Tell me about engineering departments",
-                            "What are the admission procedures?",
-                            "How do I reach the library from the main gate?"
+                            "Where is CSE department?",
+                            "How do I reach the library from the main gate?",
+                            "What are the admission procedures for B.Tech?"
                         ]
                     }
+                    if dest_loc:
+                        resp_dict['destination_id'] = dest_loc.id
+                        resp_dict['destination_name'] = dest_loc.name
+                        resp_dict['destination_slug'] = dest_loc.slug
+                    return resp_dict
             except Exception as e:
-                # Log error and fall through to built-in knowledge engine
-                print(f"Gemini API error, using built-in rule knowledge engine: {e}")
+                print(f"Gemini API error, falling back to rule engine: {e}")
 
-        # 5. Fallback rule-based verified knowledge synthesizer
+        # 3. FALLBACK: ONLY WHEN GEMINI IS NOT CONFIGURED OR TEMPORARILY OFFLINE
+        # Check greetings
+        if IntentDetector.is_greeting(clean_msg):
+            return {
+                'response': "Namaste! I am Ratna, your AI College Companion for Dr. Lankapalli Bullayya College of Engineering. How can I assist you today? You can ask me for walking directions to any campus block, department details, facilities, or admissions.",
+                'intent': 'greeting',
+                'navigation_route': None,
+                'suggested_questions': [
+                    "How do I reach the library from the main gate?",
+                    "Where is the Computer Science block?",
+                    "What are the admission requirements for B.Tech?",
+                    "Where is the college canteen?"
+                ]
+            }
+
+        # Check navigation intent
+        if dest_loc:
+            if origin_loc and route:
+                steps_str = "\n".join([f"{i+1}. {s['instruction']}" for i, s in enumerate(route['detailed_steps'])])
+                response_text = (
+                    f"Walking directions from **{origin_loc.name}** to **{dest_loc.name}** "
+                    f"({route['total_distance_meters']} meters, ~{route['estimated_minutes']} min walk):\n\n"
+                    f"{steps_str}\n\n"
+                    f"Click the button below to view the active path on the interactive campus map."
+                )
+                return {
+                    'response': response_text,
+                    'intent': 'navigation',
+                    'navigation_route': route,
+                    'suggested_questions': [
+                        "Where is the canteen?",
+                        "Show me sports facilities",
+                        "Find Principal's Office"
+                    ]
+                }
+            else:
+                if dest_loc.slug == 'cse':
+                    exact_text = "CSE is located in Block 8, 1st Floor."
+                elif dest_loc.slug == 'ece':
+                    exact_text = "ECE is located in Block 8, 2nd Floor."
+                elif dest_loc.slug == 'eee':
+                    exact_text = "EEE is located in Block 8, 3rd Floor."
+                elif dest_loc.slug == 'civil':
+                    exact_text = "Civil Engineering is located in Block 7, 3rd Floor."
+                elif dest_loc.slug == 'staff_room':
+                    exact_text = "The Staff Room is located in Block 8, 1st Floor, beside the lift."
+                else:
+                    exact_text = f"{dest_loc.name} is located at {dest_loc.block_name}, {dest_loc.floor_level}."
+
+                response_text = (
+                    f"{exact_text}\n\n"
+                    f"Would you like walking directions from the Main Gate or from another location?"
+                )
+                return {
+                    'response': response_text,
+                    'intent': 'navigation_prompt_origin',
+                    'destination_id': dest_loc.id,
+                    'destination_name': dest_loc.name,
+                    'destination_slug': dest_loc.slug,
+                    'suggested_questions': [
+                        f"How do I reach {dest_loc.name} from the main gate?",
+                        f"Directions from Admin Block to {dest_loc.name}",
+                        "Where is the Main Gate?"
+                    ]
+                }
+
+        # Knowledge Base RAG fallback
+        corpus = cls.get_context_corpus()
+        relevant_docs = cls.find_relevant_context(clean_msg, corpus, top_k=3)
         if relevant_docs:
             top_doc = relevant_docs[0]
-            # Construct clear, verified answer from top matched knowledge
             ans_content = top_doc['content']
             if top_doc['category'] == 'department':
                 resp = f"**{top_doc['title']}**\n\n{ans_content}\n\nWould you like directions to this department's block on the campus map?"
             elif top_doc['category'] == 'facility':
                 resp = f"**{top_doc['title']}**\n\n{ans_content}\n\nWould you like walking directions to this facility?"
             elif top_doc['category'] == 'admissions':
-                resp = f"**{top_doc['title']}**\n\n{ans_content}\n\n*Note: Fee structures and dates are subject to state regulatory notification. For the latest updates, please consult the college admissions desk.*"
+                resp = f"**{top_doc['title']}**\n\n{ans_content}\n\n*Note: Fee structures and dates are subject to state regulatory notification.*"
             else:
                 resp = f"{ans_content}"
                 
@@ -349,8 +337,7 @@ Assistant Answer:"""
                 ]
             }
 
-        # 6. Unanswered Question Handling
-        # Record question in unanswered questions table for administration review
+        # Unanswered Question Recording
         unanswered = UnansweredQuestion.query.filter_by(question=clean_msg).first()
         if unanswered:
             unanswered.frequency += 1
